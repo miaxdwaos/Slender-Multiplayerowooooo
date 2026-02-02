@@ -2,19 +2,16 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Slender P2P - Victim System</title>
+    <title>Slender 3D P2P - Victim POV</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: 'Courier New', monospace; overflow: hidden; }
-        canvas { display: block; background: #020202; }
+        canvas { display: block; width: 100vw; height: 100vh; }
         #ui { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; background: rgba(0,0,0,0.9); padding: 30px; border: 2px solid #440000; min-width: 320px; z-index: 100; }
         .menu-btn { padding: 12px 24px; margin: 10px; cursor: pointer; background: #600; color: white; border: none; font-weight: bold; text-transform: uppercase; }
-        .menu-btn:hover { background: #a00; }
         input { padding: 12px; background: #111; border: 1px solid #444; color: white; width: 85%; margin-bottom: 10px; }
-        #hud { position: absolute; top: 20px; left: 20px; font-size: 22px; display: none; text-shadow: 2px 2px #000; }
-        #msg-overlay { position: absolute; top: 40%; width: 100%; text-align: center; font-size: 40px; display: none; font-weight: bold; pointer-events: none; z-index: 200; }
-        #lobby-list { margin: 15px 0; text-align: left; background: #111; padding: 10px; border: 1px solid #333; }
-        .victim-name { color: #f00; font-weight: bold; }
+        #hud { position: absolute; top: 20px; left: 20px; font-size: 24px; display: none; text-shadow: 2px 2px #000; color: white; z-index: 50; }
+        #msg-overlay { position: absolute; top: 40%; width: 100%; text-align: center; font-size: 50px; display: none; font-weight: bold; z-index: 200; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -23,25 +20,21 @@
     <div id="msg-overlay"></div>
 
     <div id="ui">
-        <h1>SLENDER P2P</h1>
+        <h1>SLENDER 3D</h1>
         <div id="main-menu">
             <button class="menu-btn" onclick="startSolo()">Solitario</button><br>
             <button class="menu-btn" onclick="initMultiplayer(true)">Crear Sala</button><br>
             <button class="menu-btn" onclick="showJoinInput()">Unirse</button>
         </div>
-
         <div id="join-section" style="display:none;">
-            <input type="text" id="peer-id-input" placeholder="Pegar ID aquí">
+            <input type="text" id="peer-id-input" placeholder="ID del Host">
             <br>
             <button class="menu-btn" onclick="initMultiplayer(false)">Conectar</button>
         </div>
-
         <div id="lobby" style="display:none;">
-            <h3 id="lobby-status">CONECTANDO...</h3>
-            <p>ID DE SALA: <b id="display-id" style="color:red">...</b></p>
+            <p>TU ID: <b id="display-id" style="color:red">...</b></p>
             <div id="lobby-list"></div>
             <button id="start-btn" class="menu-btn" style="display:none;" onclick="broadcastStart()">Iniciar Partida</button>
-            <p id="wait-msg" style="display:none; color: gray;">Esperando al Host...</p>
         </div>
     </div>
 
@@ -50,120 +43,80 @@
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.onresize = resize;
+        resize();
 
-        const GameContentSlender = { PersonSpriteheh: new Image() };
-        GameContentSlender.PersonSpriteheh.src = "PersonSpriteheh.jpg";
+        // --- Configuración Mapa y Raycasting ---
+        const mapSize = 16;
+        const tileSize = 64;
+        const worldMap = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,1,0,0,0,0,1,0,0,0,0,0,1],
+            [1,0,0,0,1,0,0,0,0,1,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,1,0,0,1,1,0,0,1,1,0,0,1,1,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1],
+            [1,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,1,0,0,1,0,0,0,1,0,0,1,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
 
-        let player = { name: "Victim 1", x: 400, y: 400, size: 50, speed: 4, color: "rgba(255, 0, 0, 0.3)", dead: false, angle: 0 };
-        let remotePlayer = { name: "Victim 2", x: -200, y: -200, active: false, color: "rgba(0, 100, 255, 0.3)", dead: false, angle: 0 };
-        let slender = { x: 100, y: 100, w: 40, h: 90, speed: 1.5 };
+        let player = { name: "Victim 1", x: 150, y: 150, dir: 0, dead: false, speed: 3, rotSpeed: 0.05 };
+        let remotePlayer = { name: "Victim 2", x: -100, y: -100, active: false, dead: false };
+        let slender = { x: 800, y: 800, active: true };
         let pages = [];
         let collectedPages = 0;
         let gameRunning = false;
         let isHost = false;
         let peer, conn;
 
-        // --- Salida de Jugador ---
-        window.addEventListener('beforeunload', () => {
-            if (conn && conn.open) conn.send({ type: 'DISCONNECT', victim: player.name });
-        });
-
-        function removeRemotePlayer(vName) {
-            if (!remotePlayer.active) return;
-            remotePlayer.active = false;
-            
-            const overlay = document.getElementById('msg-overlay');
-            overlay.innerText = `${vName} se ha salido...`;
-            overlay.style.color = "orange";
-            overlay.style.display = "block";
-
-            setTimeout(() => { if(gameRunning) overlay.style.display = "none"; else location.reload(); }, 3000);
-        }
-
+        // --- P2P ---
         function showJoinInput() {
             document.getElementById('main-menu').style.display = 'none';
             document.getElementById('join-section').style.display = 'block';
         }
 
-        function updateLobbyUI() {
-            const list = document.getElementById('lobby-list');
-            list.innerHTML = `<div>• <span class="victim-name">${player.name}</span> (Tú)</div>`;
-            if (remotePlayer.active) {
-                list.innerHTML += `<div>• <span class="victim-name">${remotePlayer.name}</span> (Listo)</div>`;
-            }
-        }
-
         function initMultiplayer(asHost) {
             isHost = asHost;
             player.name = isHost ? "Victim 1" : "Victim 2";
-            remotePlayer.name = isHost ? "Victim 2" : "Victim 1";
-            
             peer = new Peer();
             document.getElementById('main-menu').style.display = 'none';
-            document.getElementById('join-section').style.display = 'none';
             document.getElementById('lobby').style.display = 'block';
-
-            peer.on('open', (id) => {
+            peer.on('open', id => {
                 document.getElementById('display-id').innerText = id;
-                document.getElementById('lobby-status').innerText = "LOBBY LISTO";
-                updateLobbyUI();
-                if (!isHost) {
-                    conn = peer.connect(document.getElementById('peer-id-input').value.trim());
-                    setupConnection();
-                }
+                if (!isHost) conn = peer.connect(document.getElementById('peer-id-input').value.trim());
+                setupConn();
             });
-
-            peer.on('connection', (c) => {
-                conn = c;
-                setupConnection();
-                if (isHost) {
-                    remotePlayer.active = true;
-                    document.getElementById('start-btn').style.display = 'inline-block';
-                    updateLobbyUI();
-                }
-            });
+            peer.on('connection', c => { conn = c; setupConn(); if(isHost) document.getElementById('start-btn').style.display = 'block'; });
         }
 
-        function setupConnection() {
-            conn.on('open', () => { if(!isHost) { remotePlayer.active = true; updateLobbyUI(); } });
-            conn.on('close', () => removeRemotePlayer(remotePlayer.name));
-            
-            conn.on('data', (data) => {
-                if (data.type === 'PAGES_DATA') pages = data.pages;
-                if (data.type === 'START') startGame();
-                if (data.type === 'DISCONNECT') removeRemotePlayer(data.victim);
-                if (data.type === 'SYNC') {
-                    remotePlayer.x = data.x; remotePlayer.y = data.y;
-                    remotePlayer.dead = data.dead; remotePlayer.angle = data.angle;
-                    remotePlayer.active = true;
-                }
-                if (data.type === 'COLLECT') {
-                    pages[data.index].collected = true;
-                    checkPages();
-                }
+        function setupConn() {
+            conn.on('data', data => {
+                if (data.type === 'START') { pages = data.pages; startGame(); }
+                if (data.type === 'SYNC') { remotePlayer.x = data.x; remotePlayer.y = data.y; remotePlayer.active = true; remotePlayer.dead = data.dead; }
+                if (data.type === 'COLLECT') { pages[data.index].collected = true; updatePages(); }
             });
-            if (!isHost) document.getElementById('wait-msg').style.display = 'block';
         }
 
         function broadcastStart() {
-            for(let i=0; i<8; i++) {
-                pages.push({ x: Math.random()*(canvas.width-100)+50, y: Math.random()*(canvas.height-100)+50, collected: false });
-            }
-            if(conn && conn.open) {
-                conn.send({ type: 'PAGES_DATA', pages: pages });
-                conn.send({ type: 'START' });
-            }
+            for(let i=0; i<8; i++) pages.push({ x: Math.random()*800+100, y: Math.random()*800+100, collected: false });
+            conn.send({ type: 'START', pages: pages });
             startGame();
         }
 
-        function startSolo() {
-            isHost = true;
-            player.name = "Victim 1";
-            for(let i=0; i<8; i++) pages.push({ x: Math.random()*(canvas.width-100)+50, y: Math.random()*(canvas.height-100)+50, collected: false });
-            startGame();
-        }
+        function startSolo() { isHost = true; broadcastStart(); }
 
         function startGame() {
             document.getElementById('ui').style.display = 'none';
@@ -172,101 +125,141 @@
             gameLoop();
         }
 
-        const keys = {};
-        window.onkeydown = (e) => keys[e.key.toLowerCase()] = true;
-        window.onkeyup = (e) => keys[e.key.toLowerCase()] = false;
+        // --- Renderizado 3D ---
+        function drawRaycast() {
+            // Techo y Suelo
+            ctx.fillStyle = "#111"; ctx.fillRect(0, 0, canvas.width, canvas.height/2);
+            ctx.fillStyle = "#222"; ctx.fillRect(0, canvas.height/2, canvas.width, canvas.height/2);
 
-        function update() {
-            if (!gameRunning) return;
+            const numRays = canvas.width / 2;
+            const fov = Math.PI / 3;
+            
+            for (let i = 0; i < numRays; i++) {
+                let rayAngle = (player.dir - fov/2) + (i / numRays) * fov;
+                let distanceToWall = 0;
+                let hitWall = false;
 
-            if (!player.dead) {
-                if (keys['w'] || keys['arrowup']) player.y -= player.speed;
-                if (keys['s'] || keys['arrowdown']) player.y += player.speed;
-                if (keys['a'] || keys['arrowleft']) player.x -= player.speed;
-                if (keys['d'] || keys['arrowright']) player.x += player.speed;
+                let eyeX = Math.cos(rayAngle);
+                let eyeY = Math.sin(rayAngle);
 
-                if (Math.hypot(player.x - slender.x, player.y - slender.y) < 45) {
-                    player.dead = true;
-                    player.angle = -Math.PI / 2;
+                while (!hitWall && distanceToWall < 1000) {
+                    distanceToWall += 2;
+                    let testX = Math.floor((player.x + eyeX * distanceToWall) / tileSize);
+                    let testY = Math.floor((player.y + eyeY * distanceToWall) / tileSize);
+
+                    if (testX < 0 || testX >= mapSize || testY < 0 || testY >= mapSize) {
+                        hitWall = true; distanceToWall = 1000;
+                    } else if (worldMap[testY][testX] === 1) {
+                        hitWall = true;
+                    }
                 }
 
-                pages.forEach((p, idx) => {
-                    if(!p.collected && Math.hypot(player.x+25-p.x, player.y+25-p.y) < 40) {
-                        p.collected = true;
-                        if(conn && conn.open) conn.send({ type: 'COLLECT', index: idx });
-                        checkPages();
-                    }
-                });
-            }
-
-            let target = null;
-            let d1 = !player.dead ? Math.hypot(slender.x - player.x, slender.y - player.y) : Infinity;
-            let d2 = (remotePlayer.active && !remotePlayer.dead) ? Math.hypot(slender.x - remotePlayer.x, slender.y - remotePlayer.y) : Infinity;
-            if (d1 < d2) target = player; else if (d2 !== Infinity) target = remotePlayer;
-
-            if (target) {
-                let ang = Math.atan2(target.y - slender.y, target.x - slender.x);
-                slender.x += Math.cos(ang) * (slender.speed + (collectedPages * 0.2));
-                slender.y += Math.sin(ang) * (slender.speed + (collectedPages * 0.2));
-            }
-
-            if (player.dead && (!remotePlayer.active || remotePlayer.dead)) {
-                showEndMsg("YOU LOSE", "red");
-            }
-
-            if (conn && conn.open) {
-                conn.send({ type: 'SYNC', x: player.x, y: player.y, dead: player.dead, angle: player.angle });
+                // Corregir efecto ojo de pez
+                let actualDist = distanceToWall * Math.cos(rayAngle - player.dir);
+                let ceiling = (canvas.height / 2) - canvas.height / actualDist * 30;
+                let floor = canvas.height - ceiling;
+                let color = 255 - (actualDist / 4);
+                ctx.fillStyle = `rgb(0, ${color/2}, 0)`; // Muros tipo bosque oscuro
+                ctx.fillRect(i * 2, ceiling, 2, floor - ceiling);
             }
         }
 
-        function checkPages() {
+        function drawSprite(objX, objY, color, isSlender = false) {
+            let dx = objX - player.x;
+            let dy = objY - player.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            let angle = Math.atan2(dy, dx) - player.dir;
+
+            // Mantener ángulo en rango
+            while (angle < -Math.PI) angle += Math.PI * 2;
+            while (angle > Math.PI) angle -= Math.PI * 2;
+
+            if (Math.abs(angle) < 1) { // Si está en el FOV
+                let size = (canvas.height / dist) * 40;
+                let screenX = (0.5 * (angle / (Math.PI/6)) + 0.5) * canvas.width;
+                let screenY = canvas.height / 2;
+
+                ctx.fillStyle = color;
+                if(isSlender) {
+                    // Cuerpo Slender
+                    ctx.fillRect(screenX - size/4, screenY - size, size/2, size*2);
+                    // Cabeza blanca
+                    ctx.fillStyle = "white";
+                    ctx.fillRect(screenX - size/6, screenY - size*1.2, size/3, size/3);
+                } else {
+                    ctx.fillRect(screenX - size/4, screenY - size/4, size/2, size/2);
+                }
+            }
+        }
+
+        function update() {
+            if (player.dead) return;
+
+            // Controles
+            if (keys['w']) {
+                let nx = player.x + Math.cos(player.dir) * player.speed;
+                let ny = player.y + Math.sin(player.dir) * player.speed;
+                if (worldMap[Math.floor(ny/tileSize)][Math.floor(nx/tileSize)] === 0) { player.x = nx; player.y = ny; }
+            }
+            if (keys['s']) {
+                let nx = player.x - Math.cos(player.dir) * player.speed;
+                let ny = player.y - Math.sin(player.dir) * player.speed;
+                if (worldMap[Math.floor(ny/tileSize)][Math.floor(nx/tileSize)] === 0) { player.x = nx; player.y = ny; }
+            }
+            if (keys['a']) player.dir -= player.rotSpeed;
+            if (keys['d']) player.dir += player.rotSpeed;
+
+            // Slender IA (Host controla)
+            if(isHost) {
+                let ang = Math.atan2(player.y - slender.y, player.x - slender.x);
+                slender.x += Math.cos(ang) * (1 + collectedPages*0.2);
+                slender.y += Math.sin(ang) * (1 + collectedPages*0.2);
+            }
+
+            // Colisión Mortal
+            if (Math.hypot(player.x - slender.x, player.y - slender.y) < 30) {
+                player.dead = true;
+                showEnd("TE ATRAPÓ...", "red");
+            }
+
+            // Recoger Notas
+            pages.forEach((p, idx) => {
+                if(!p.collected && Math.hypot(player.x - p.x, player.y - p.y) < 40) {
+                    p.collected = true;
+                    if(conn) conn.send({ type: 'COLLECT', index: idx });
+                    updatePages();
+                }
+            });
+
+            if (conn && conn.open) conn.send({ type: 'SYNC', x: player.x, y: player.y, dead: player.dead });
+        }
+
+        function updatePages() {
             collectedPages = pages.filter(p => p.collected).length;
             document.getElementById('pageCount').innerText = collectedPages;
-            if (collectedPages >= 8) showEndMsg("YOU WON", "#0f0");
+            if(collectedPages >= 8) showEnd("HAS ESCAPADO", "#0f0");
         }
 
-        function showEndMsg(txt, color) {
+        function showEnd(t, c) {
             gameRunning = false;
-            const overlay = document.getElementById('msg-overlay');
-            overlay.innerText = txt;
-            overlay.style.color = color;
-            overlay.style.display = "block";
-            setTimeout(() => location.reload(), 5000);
+            const o = document.getElementById('msg-overlay');
+            o.innerText = t; o.style.color = c; o.style.display = "block";
+            setTimeout(() => location.reload(), 4000);
         }
 
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = "#020202";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            pages.forEach(p => { if(!p.collected) { ctx.fillStyle = "white"; ctx.fillRect(p.x, p.y, 12, 18); }});
-
-            ctx.fillStyle = "black";
-            ctx.fillRect(slender.x, slender.y, slender.w, slender.h);
-            ctx.fillStyle = "white";
-            ctx.fillRect(slender.x+5, slender.y-15, slender.w-10, 15);
-
-            const myColor = isHost ? player.color : remotePlayer.color;
-            const otherColor = isHost ? remotePlayer.color : player.color;
-
-            drawSprite(player.x, player.y, myColor, player.angle);
-            if (remotePlayer.active) drawSprite(remotePlayer.x, remotePlayer.y, otherColor, remotePlayer.angle);
-        }
-
-        function drawSprite(x, y, tint, ang) {
-            ctx.save();
-            ctx.translate(x + 25, y + 25);
-            ctx.rotate(ang);
-            ctx.drawImage(GameContentSlender.PersonSpriteheh, -25, -25, 50, 50);
-            ctx.fillStyle = tint;
-            ctx.fillRect(-25, -25, 50, 50);
-            ctx.restore();
-        }
+        const keys = {};
+        window.onkeydown = e => keys[e.key.toLowerCase()] = true;
+        window.onkeyup = e => keys[e.key.toLowerCase()] = false;
 
         function gameLoop() {
+            if(!gameRunning) return;
             update();
-            draw();
-            if(gameRunning) requestAnimationFrame(gameLoop);
+            drawRaycast();
+            // Dibujar Objetos 3D
+            pages.forEach(p => { if(!p.collected) drawSprite(p.x, p.y, "white"); });
+            if(remotePlayer.active && !remotePlayer.dead) drawSprite(remotePlayer.x, remotePlayer.y, "rgba(0,100,255,0.5)");
+            drawSprite(slender.x, slender.y, "black", true);
+            requestAnimationFrame(gameLoop);
         }
     </script>
 </body>
